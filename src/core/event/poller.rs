@@ -39,15 +39,15 @@ impl Poller {
         let mut evlist: Vec<MaybeUninit<libc::kevent>> = Vec::with_capacity(max_events);
         evlist.resize_with(max_events, MaybeUninit::uninit);
 
-        let mut ts_storage: Option<timespec> = None;
+        let mut _ts_storage: Option<timespec> = None;
         let ts_ptr: *const timespec = match timeout_ms {
             None => ptr::null(),
             Some(ms) => {
                 let mut ts: timespec = unsafe { zeroed() };
                 ts.tv_sec = (ms / 1000) as i64;
                 ts.tv_nsec = ((ms % 1000) * 1_000_000) as i64;
-                ts_storage = Some(ts);
-                ts_storage.as_ref().unwrap() as *const timespec
+                _ts_storage = Some(ts);
+                _ts_storage.as_ref().unwrap() as *const timespec
             }
         };
 

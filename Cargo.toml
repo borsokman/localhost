@@ -2,6 +2,7 @@
 name = "localhost"
 version = "0.1.0"
 edition = "2024"
-libc = "0.2"
 
 [dependencies]
+libc = "0.2"
+twoway = "0.2"

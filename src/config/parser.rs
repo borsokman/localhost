@@ -16,7 +16,19 @@ enum Token {
 pub fn parse_config(input: &str, base_dir: &Path) -> Result<Config, String> {
     let tokens = tokenize(input)?;
     let mut p = Parser { tokens, pos: 0, base_dir };
-    p.parse_config()
+    let mut cfg = p.parse_config()?;
+
+    // Validation
+    if cfg.servers.is_empty() {
+        return Err("No servers defined".into());
+    }
+    for (i, s) in cfg.servers.iter().enumerate() {
+        if s.listen.is_empty() {
+            return Err(format!("Server #{i} missing listen directive"));
+        }
+    }
+
+    Ok(cfg)
 }
 
 fn tokenize(input: &str) -> Result<Vec<Token>, String> {
@@ -27,17 +39,20 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             '{' => { chars.next(); tokens.push(Token::LBrace); }
             '}' => { chars.next(); tokens.push(Token::RBrace); }
             ';' => { chars.next(); tokens.push(Token::Semi); }
-            '#' => { // comment until EOL
-                while let Some(ch) = chars.next() {
-                    if ch == '\n' { break; }
-                }
-            }
+            '#' => { while let Some(ch) = chars.next() { if ch == '\n' { break; } } }
             '"' => {
                 chars.next();
                 let mut s = String::new();
+                let mut terminated = false;
                 while let Some(ch) = chars.next() {
-                    if ch == '"' { break; }
+                    if ch == '"' {
+                        terminated = true;
+                        break;
+                    }
                     s.push(ch);
+                }
+                if !terminated {
+                    return Err("Unterminated string literal".into());
                 }
                 tokens.push(Token::StringLit(s));
             }
@@ -50,7 +65,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 let n = s.parse::<u64>().map_err(|e| e.to_string())?;
                 tokens.push(Token::Number(n));
             }
-            _ => { // ident-ish
+            _ => {
                 let mut s = String::new();
                 while let Some(&ch) = chars.peek() {
                     if ch.is_ascii_whitespace() || ch == '{' || ch == '}' || ch == ';' {
@@ -78,7 +93,7 @@ impl<'a> Parser<'a> {
         while !self.is_end() {
             match self.peek() {
                 Some(Token::Ident(ref s)) if s == "server" => {
-                    self.next(); // consume "server"
+                    self.next();
                     self.expect(Token::LBrace)?;
                     servers.push(self.parse_server()?);
                 }
@@ -95,7 +110,6 @@ impl<'a> Parser<'a> {
         let mut root = None;
         let mut index = Vec::new();
         let mut error_pages = Vec::new();
-        let mut client_max_body_size = None;
         let mut locations = Vec::new();
 
         loop {
@@ -144,16 +158,15 @@ impl<'a> Parser<'a> {
                     error_pages.push(ErrorPage { code, path });
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "client_max_body_size" => {
-                    self.next();
-                    client_max_body_size = Some(self.expect_number_u64()?);
-                    self.expect(Token::Semi)?;
-                }
                 Some(Token::Ident(ref s)) if s == "location" => {
                     self.next();
                     let path = self.expect_stringish()?;
                     self.expect(Token::LBrace)?;
-                    locations.push(self.parse_location(path)?);
+                    let mut loc = self.parse_location(path)?;
+                    if loc.root.is_none() {
+                        loc.root = root.clone(); // inherit root
+                    }
+                    locations.push(loc);
                 }
                 Some(tok) => return Err(format!("Unknown directive in server: {:?}", tok)),
                 None => return Err("Unexpected EOF in server block".into()),
@@ -166,7 +179,6 @@ impl<'a> Parser<'a> {
             root,
             index,
             error_pages,
-            client_max_body_size,
             locations,
         })
     }
@@ -262,13 +274,17 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_socket_addr(&self, s: &str) -> Result<SocketAddr, String> {
-        if s.contains(':') {
-            s.parse::<SocketAddr>().map_err(|e| e.to_string())
-        } else {
-            format!("0.0.0.0:{s}")
-                .parse::<SocketAddr>()
-                .map_err(|e| e.to_string())
+        // Try full parse (handles IPv6 like [::1]:8080 or ::1:8080)
+        if let Ok(a) = s.parse::<SocketAddr>() {
+            return Ok(a);
         }
+        // If only a port was given, default to 0.0.0.0
+        if let Ok(port) = s.parse::<u16>() {
+            return format!("0.0.0.0:{port}")
+                .parse::<SocketAddr>()
+                .map_err(|e| e.to_string());
+        }
+        Err(format!("Invalid listen address: {s}"))
     }
 
     fn parse_path(&mut self) -> Result<PathBuf, String> {
