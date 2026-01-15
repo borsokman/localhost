@@ -2,6 +2,7 @@
 pub enum StatusCode {
     Ok,
     BadRequest,
+    Forbidden,
     NotFound,
     MethodNotAllowed,
     PayloadTooLarge,
@@ -13,6 +14,7 @@ impl StatusCode {
         match self {
             StatusCode::Ok => 200,
             StatusCode::BadRequest => 400,
+            StatusCode::Forbidden => 403,
             StatusCode::NotFound => 404,
             StatusCode::MethodNotAllowed => 405,
             StatusCode::PayloadTooLarge => 413,
@@ -23,6 +25,7 @@ impl StatusCode {
         match self {
             StatusCode::Ok => "OK",
             StatusCode::BadRequest => "Bad Request",
+            StatusCode::Forbidden => "Forbidden",
             StatusCode::NotFound => "Not Found",
             StatusCode::MethodNotAllowed => "Method Not Allowed",
             StatusCode::PayloadTooLarge => "Payload Too Large",

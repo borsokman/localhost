@@ -19,7 +19,13 @@ pub fn parse_request(buf: &[u8], body_limit: usize) -> ParseResult {
         Err(_) => return ParseResult::Error("invalid utf8 in headers".into()),
     };
     let mut lines = head_str.split("\r\n").filter(|l| !l.is_empty());
-    let req_line = lines.next().ok_or("empty request line").unwrap();
+    let req_line = match lines.next() {
+    Some(line) => line,
+    None => {
+        println!("Parse error: empty request line");
+        return ParseResult::Error("empty request line".into());
+    }
+};
     let mut parts = req_line.split_whitespace();
     let method_str = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("").to_string();
@@ -29,6 +35,7 @@ pub fn parse_request(buf: &[u8], body_limit: usize) -> ParseResult {
         None => return ParseResult::Error("unsupported method".into()),
     };
     if !version.starts_with("HTTP/1.") {
+        println!("Parse error: unsupported method");
         return ParseResult::Error("unsupported version".into());
     }
 
@@ -49,6 +56,7 @@ pub fn parse_request(buf: &[u8], body_limit: usize) -> ParseResult {
 
     let body_len = content_length.unwrap_or(0);
     if body_len > body_limit {
+        println!("Parse error: body too large");
         return ParseResult::Error("body too large".into());
     }
     let total_needed = headers_end + body_len;

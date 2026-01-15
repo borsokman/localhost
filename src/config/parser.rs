@@ -16,7 +16,7 @@ enum Token {
 pub fn parse_config(input: &str, base_dir: &Path) -> Result<Config, String> {
     let tokens = tokenize(input)?;
     let mut p = Parser { tokens, pos: 0, base_dir };
-    let mut cfg = p.parse_config()?;
+    let cfg = p.parse_config()?;
 
     // Validation
     if cfg.servers.is_empty() {
@@ -60,11 +60,19 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             c if c.is_ascii_digit() => {
                 let mut s = String::new();
                 while let Some(&ch) = chars.peek() {
-                    if ch.is_ascii_digit() { s.push(ch); chars.next(); } else { break; }
-                }
+                    if ch.is_ascii_whitespace() || ch == '{' || ch == '}' || ch == ';' { 
+                        break; 
+                    }
+                    s.push(ch);
+                    chars.next();
+              }
+              if s.chars().all(|ch| ch.is_ascii_digit()) {
                 let n = s.parse::<u64>().map_err(|e| e.to_string())?;
                 tokens.push(Token::Number(n));
+              } else {
+                tokens.push(Token::Ident(s));
             }
+        }
             _ => {
                 let mut s = String::new();
                 while let Some(&ch) = chars.peek() {
@@ -92,7 +100,7 @@ impl<'a> Parser<'a> {
         let mut servers = Vec::new();
         while !self.is_end() {
             match self.peek() {
-                Some(Token::Ident(ref s)) if s == "server" => {
+                Some(Token::Ident(s)) if s == "server" => {
                     self.next();
                     self.expect(Token::LBrace)?;
                     servers.push(self.parse_server()?);
@@ -111,17 +119,18 @@ impl<'a> Parser<'a> {
         let mut index = Vec::new();
         let mut error_pages = Vec::new();
         let mut locations = Vec::new();
+        let mut client_max_body_size = None;
 
         loop {
             match self.peek() {
                 Some(Token::RBrace) => { self.next(); break; }
-                Some(Token::Ident(ref s)) if s == "listen" => {
+                Some(Token::Ident(s)) if s == "listen" => {
                     self.next();
                     let addr = self.parse_listen_value()?;
                     listen.push(addr);
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "server_name" => {
+                Some(Token::Ident(s)) if s == "server_name" => {
                     self.next();
                     loop {
                         match self.peek() {
@@ -133,13 +142,13 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "root" => {
+                Some(Token::Ident(s)) if s == "root" => {
                     self.next();
                     let path = self.parse_path()?;
                     root = Some(path);
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "index" => {
+                Some(Token::Ident(s)) if s == "index" => {
                     self.next();
                     loop {
                         match self.peek() {
@@ -151,14 +160,14 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "error_page" => {
+                Some(Token::Ident(s)) if s == "error_page" => {
                     self.next();
                     let code = self.expect_number_u16()?;
                     let path = self.expect_stringish()?;
                     error_pages.push(ErrorPage { code, path });
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "location" => {
+                Some(Token::Ident(s)) if s == "location" => {
                     self.next();
                     let path = self.expect_stringish()?;
                     self.expect(Token::LBrace)?;
@@ -167,6 +176,11 @@ impl<'a> Parser<'a> {
                         loc.root = root.clone(); // inherit root
                     }
                     locations.push(loc);
+                }
+                Some(Token::Ident(s)) if s == "client_max_body_size" => {
+                    self.next();
+                    client_max_body_size = Some(self.expect_number_u64()?);
+                    self.expect(Token::Semi)?;
                 }
                 Some(tok) => return Err(format!("Unknown directive in server: {:?}", tok)),
                 None => return Err("Unexpected EOF in server block".into()),
@@ -180,6 +194,7 @@ impl<'a> Parser<'a> {
             index,
             error_pages,
             locations,
+            client_max_body_size,
         })
     }
 
@@ -195,12 +210,12 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 Some(Token::RBrace) => { self.next(); break; }
-                Some(Token::Ident(ref s)) if s == "root" => {
+                Some(Token::Ident(s)) if s == "root" => {
                     self.next();
                     root = Some(self.parse_path()?);
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "methods" => {
+                Some(Token::Ident(s)) if s == "methods" => {
                     self.next();
                     let mut ms = Vec::new();
                     loop {
@@ -213,12 +228,12 @@ impl<'a> Parser<'a> {
                     methods = Some(ms);
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "redirect" => {
+                Some(Token::Ident(s)) if s == "redirect" => {
                     self.next();
                     redirect = Some(self.expect_stringish()?);
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "autoindex" => {
+                Some(Token::Ident(s)) if s == "autoindex" => {
                     self.next();
                     let v = self.expect_ident()?.to_lowercase();
                     autoindex = match v.as_str() {
@@ -228,19 +243,19 @@ impl<'a> Parser<'a> {
                     };
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "default_file" => {
+                Some(Token::Ident(s)) if s == "default_file" => {
                     self.next();
                     default_file = Some(self.expect_stringish()?);
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "cgi" => {
+                Some(Token::Ident(s)) if s == "cgi" => {
                     self.next();
                     let ext = self.expect_stringish()?;
                     let interpreter = PathBuf::from(self.expect_stringish()?);
                     cgi = Some(Cgi { extension: ext, interpreter });
                     self.expect(Token::Semi)?;
                 }
-                Some(Token::Ident(ref s)) if s == "body_limit" => {
+                Some(Token::Ident(s)) if s == "body_limit" => {
                     self.next();
                     body_limit = Some(self.expect_number_u64()?);
                     self.expect(Token::Semi)?;

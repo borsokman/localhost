@@ -1,0 +1,385 @@
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0;
+    height: 100vh;
+    background-color: #474747;
+    /* background: #000 url("images/background03.jpg") no-repeat center center; */
+    background-image: url("images/background03.jpg");
+    background-size: cover;
+
+    font-family: Rockwell, 'Rockwell Nova', 'Roboto Slab', 'DejaVu Serif', 'Sitka Small', serif;
+}
+
+body.grey {
+    background-image: none;
+}
+
+
+button {
+    font-family: Superclarendon, 'Bookman Old Style', 'URW Bookman', 'URW Bookman L', 'Georgia Pro', Georgia, serif;
+}
+
+#game-container {
+    position: absolute;
+    background: #1d3f26;
+    background-image: url("images/bluegrass.jpg");
+    z-index: -1;
+
+}
+
+/* Level-specific backgrounds */
+
+#game-container.level-1 {
+    background-image: url("images/bluegrass.jpg");
+}
+
+#game-container.level-2 {
+    background-image: url("images/backgroundDeepwater.png");
+}
+
+#game-container.level-3 {
+    background-image: url("images/sandshadow.jpg");
+}
+
+#game-container.level-4 {
+    background-image: url("images/yellowgrass.jpg");
+}
+
+#game-container.level-5 {
+    background-image: url("images/lavaSand.jpg");
+}
+
+
+#player {
+    will-change: transform;
+    /* to own layer => GPU acceleration */
+    background-image: url("images/nalleRight3.png");
+    background-size: contain;
+    z-index: 10;
+}
+
+#player.left {
+    background-image: url('images/nalleLeft3.png');
+}
+
+#player.dead {
+    background-image: url("images/nalleDead.png");
+}
+
+#player.invulnerable {
+    background-image: url('images/nalleRight3white.png');
+}
+
+#player.left.invulnerable {
+    background-image: url('images/nalleLeft3white.png');
+}
+
+.enemy {
+    position: absolute;
+    will-change: transform;
+    /* to own layer => GPU acceleration */
+    background-image: url("images/enemy.png");
+    background-size: contain;
+    /* Ensure the image is fully visible */
+    background-position: center;
+    /* Center the image within the element */
+    background-repeat: no-repeat;
+    /* Prevent the image from repeating */
+    z-index: 9;
+}
+
+.enemy.dead {
+    background-image: url("images/enemyDead.png");
+}
+
+.wall {
+    z-index: 3;
+    background-size: cover;
+}
+
+.level-1.wall.solid {
+    background-image: url("images/solidwall.svg")
+}
+
+.level-1.wall.weak {
+    background-image: url("images/weakwall02.svg");
+}
+
+.level-2.wall.solid {
+    background-image: url("images/solidwallSnow.svg")
+}
+
+.level-2.wall.weak {
+    background-image: url("images/weakwallice.svg");
+}
+
+.level-3.wall.solid {
+    background-image: url("images/solidwallConcreat.png")
+}
+
+.level-3.wall.weak {
+    background-image: url("images/weakwallBrown.svg");
+}
+
+.level-4.wall.solid {
+    background-image: url("images/solidwallGreen.png")
+}
+
+.level-4.wall.weak {
+    background-image: url("images/weakwallArmy.png");
+}
+
+.level-5.wall.solid {
+    background-image: url("images/solidwallLava.png")
+}
+
+.level-5.wall.weak {
+    background-image: url("images/weakwallLava2.jpg");
+}
+
+.level-1.wall.burning,
+.level-2.wall.burning,
+.level-3.wall.burning,
+.level-4.wall.burning,
+.level-5.wall.burning {
+    background-image: url("images/burningwall.svg");
+}
+
+.bomb {
+    position: absolute;
+    background-image: url("images/bomb.svg");
+    background-size: cover;
+    z-index: 4;
+}
+
+.bomb.glowing {
+    background-image: url("images/bomborange.svg");
+}
+
+.flame {
+    position: absolute;
+    z-index: 1;
+}
+
+.flame.horizontal {
+    background-image: url("images/flamehor.svg");
+    background-size: cover;
+}
+
+.flame.horizontal.ends {
+    background-image: url("images/flameendsh.svg");
+    background-size: cover;
+    z-index: 0;
+}
+
+.flame.vertical {
+    background-image: url("images/flamevert.svg");
+    background-size: cover;
+}
+
+.flame.vertical.ends {
+    background-image: url("images/flameendsv.svg");
+    background-size: cover;
+    z-index: 0;
+}
+
+.powerup {
+    position: absolute;
+    z-index: 2;
+}
+
+.bombup {
+    background-image: url("images/bombup.svg");
+    background-size: cover;
+}
+
+.flameup {
+    background-image: url("images/flameup.svg");
+    background-size: cover;
+}
+
+.finish {
+    background-image: url("images/finishgrey.svg");
+    background-size: cover;
+    position: absolute;
+    z-index: 2;
+}
+
+#start-menu {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    padding: 20px;
+    text-align: center;
+    z-index: 30;
+    border-radius: 10px;
+    display: none;
+}
+
+#start-menu h1 {
+    margin: 0;
+    font-size: 2em;
+    text-shadow: 2px 2px 4px #000;
+
+}
+
+#start-menu button {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 1.2em;
+    background: #fff;
+    color: #000;
+    border: none;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+#start-menu button:hover {
+    background: #ddd;
+}
+
+#pause-menu {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(255, 255, 255, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    display: none;
+    z-index: 20;
+    width: 300px;
+    height: 200px;
+    text-align: center;
+}
+
+#pause-menu button {
+    display: block;
+    margin: 15px auto;
+    padding: 12px 24px;
+    font-size: 1.1em;
+    background: #fff;
+    color: #000;
+    border: none;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+
+#game-over-menu {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8) url("images/loser1.gif") no-repeat center center;
+    background-size: cover;
+    padding: 30px;
+    border-radius: 20px;
+    display: none;
+    z-index: 20;
+    width: 480px;
+    height: 480px;
+    color: #fff;
+    text-align: center;
+}
+
+#game-over-menu h1 {
+    position: relative;
+    margin: 0px;
+    font-size: 3em;
+    text-shadow: 2px 2px 4px #000;
+}
+
+#game-over-menu button {
+    display: block;
+    margin: 390px auto;
+    padding: 12px 24px;
+    font-size: 1.2em;
+    background: #fff;
+    color: #000;
+    border: none;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+#game-over-menu button:hover {
+    background: #ddd;
+}
+
+#victory {
+    width: 70vw;
+    height: 70vh;
+    /*     width: 100vw;
+    height: 80vh; */
+    background-image: url("images/victory.svg");
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    display: none;
+    color: white;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.victory-text {
+    max-width: 30vw;
+    text-align: center;
+    background: white;
+    padding: 1.5vh;
+    border-radius: 10px;
+    color: black;
+}
+
+#victory h1.victory-text {
+    font-size: 36px;
+    font-weight: bold;
+    margin-bottom: 20px;
+    margin-top: 50px;
+}
+
+#victory-message.victory-text {
+    font-size: 24px;
+    margin-top: 0;
+}
+
+#victory button {
+    padding: 12px 24px;
+    font-size: 1.8em;
+    background: #fff;
+    color: #000;
+    border: none;
+    cursor: pointer;
+    border-radius: 10px;
+    margin-top: 10vh;
+}
+
+#victory button:hover {
+    background: #ddd;
+}
+
+.textbar {
+    display: flex;
+    flex-direction: row;
+    position: absolute;
+    font-family: monospace;
+    justify-content: space-around;
+}
+
+.infobox {
+    flex: 1;
+    /* Equal width for all */
+    background-color: #474747;
+    border-style: solid;
+    border-color: #ececec;
+    text-align: left;
+    color: white;
+    border-radius: 5px;
+
+    display: flex;
+    align-items: center;
+}

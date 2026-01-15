@@ -4,18 +4,21 @@ mod core;
 mod application;
 #[path = "../http/mod.rs"]
 mod http;
+#[path = "../config/mod.rs"]
+mod config;
 
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::os::fd::AsRawFd;
 
-use application::handler::static_file::serve_static;
+use application::handler::{static_file::serve_static, error_page_handler::error_response};
 use application::server::manager::ServerManager;
 use core::event::EventLoop;
 use core::net::connection::Connection;
 use core::net::socket::{accept_nonblocking, create_listening_socket};
 use http::parser::{parse_request, ParseResult};
 use http::serializer::serialize_response;
+use crate::http::StatusCode;
 
 fn main() -> Result<(), String> {
     let listen_addr: SocketAddr = "0.0.0.0:8080".parse().unwrap();
@@ -23,8 +26,10 @@ fn main() -> Result<(), String> {
     let listener = create_listening_socket(listen_addr)?;
     let event_loop = EventLoop::new()?;
     event_loop.poller().register_read(listener.0)?;
-
     let mut mgr = ServerManager::new(Duration::from_secs(15));
+    let cfg = config::load_config(std::path::Path::new("config.conf"))?;
+    let server = &cfg.servers[0];
+    let root = server.root.clone().unwrap_or_else(|| std::path::PathBuf::from("www"));
 
     loop {
         event_loop.tick(64, Some(1000), |ev| {
@@ -51,17 +56,31 @@ fn main() -> Result<(), String> {
                             conn.read_buf.extend_from_slice(&buf[..n]);
                             match parse_request(&conn.read_buf, 1_048_576) {
                                 ParseResult::Incomplete => break,
-                                ParseResult::Error(_) => {
-                                    conn.write_buf = b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".to_vec();
+                                ParseResult::Error(err) => {
+                                    let status = if err == "body too large" {
+                                        StatusCode::PayloadTooLarge
+                                    } else {
+                                        StatusCode::BadRequest
+                                    };
+                                    let resp = error_response(status, server, &root);
+                                    let mut bytes = serialize_response(&resp, false);
+                                    conn.write_buf.append(&mut bytes);
                                     conn.state = core::net::connection::ConnState::Writing;
                                     let _ = event_loop.poller().register_write(ev.fd);
                                     break;
                                 }
                                 ParseResult::Complete(req, used) => {
                                     conn.read_buf.drain(0..used);
-                                    let resp = serve_static(std::path::Path::new("./www"), &req.path, &["index.html".into()]);
-                                    let mut bytes = serialize_response(&resp);
-                                    conn.write_buf.append(&mut bytes);
+                                    conn.keep_alive = req.keep_alive;
+                                    if !matches!(req.method, http::method::Method::Get) {
+                                        let resp = error_response(StatusCode::MethodNotAllowed, server, &root);
+                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                        conn.write_buf.append(&mut bytes);
+                                    } else {
+                                        let resp = serve_static(server, &root, &req.path, &["index.html".into()]);
+                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                        conn.write_buf.append(&mut bytes);
+                                    }
                                     conn.state = core::net::connection::ConnState::Writing;
                                     let _ = event_loop.poller().register_write(ev.fd);
                                     break;
@@ -83,7 +102,11 @@ fn main() -> Result<(), String> {
                     }
                     if conn.write_buf.is_empty() {
                         let _ = event_loop.poller().disable_write(ev.fd);
-                        conn.state = core::net::connection::ConnState::Closing;
+                        if conn.keep_alive {
+                            conn.state = core::net::connection::ConnState::Reading;
+                        } else {
+                            conn.state = core::net::connection::ConnState::Closing;
+                        }
                     }
                 }
                 if ev.error || ev.eof || matches!(conn.state, core::net::connection::ConnState::Closing) {
