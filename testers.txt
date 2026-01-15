@@ -1,0 +1,29 @@
+403: curl -v http://127.0.0.1:8080/../ (traversal rejected) or a file you can’t read
+404: curl -v http://127.0.0.1:8080/nope
+405: curl -v -X POST http://127.0.0.1:8080/
+413: dd if=/dev/zero of=bigfile bs=1M count=2
+curl -v -H "Content-Length: 2000000" --data-binary @bigfile http://127.0.0.1:8080/
+500: simulate by making the target unreadable in another way (e.g., directory instead of file with no index).
+
+
+CGI:
+
+http://localhost:8080/cgi-bin/hello.py?x=1
+
+GET: curl -v "http://127.0.0.1:8080/cgi-bin/hello.py?x=1"
+
+POST: curl -v -X POST --data "hi" http://127.0.0.1:8080/cgi-bin/hello.py
+
+DELETE: curl -v -X DELETE --data "bye" http://127.0.0.1:8080/cgi-bin/hello.py
+
+fetch('/cgi-bin/hello.py?x=1', { method: 'POST', body: 'hi' })
+  .then(r => r.text()).then(console.log);
+
+fetch('/cgi-bin/hello.py', { method: 'DELETE', body: 'bye' })
+  .then(r => r.text()).then(console.log);
+
+
+Upload:
+
+echo "hello" > /tmp/test.txt
+curl -v -F "file=@/tmp/test.txt" http://127.0.0.1:8080/upload

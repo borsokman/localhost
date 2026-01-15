@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <button onclick="doPost()">POST</button>
+    <button onclick="doDelete()">DELETE</button>
+    <pre id="out"></pre>
+    <script>
+      const out = document.getElementById("out");
+      async function doPost() {
+        const r = await fetch("/cgi-bin/hello.py?x=1", {
+          method: "POST",
+          body: "hi",
+        });
+        out.textContent = await r.text();
+      }
+      async function doDelete() {
+        const r = await fetch("/cgi-bin/hello.py", {
+          method: "DELETE",
+          body: "bye",
+        });
+        out.textContent = await r.text();
+      }
+    </script>
+  </body>
+</html>

@@ -11,6 +11,7 @@ pub enum ConnState {
 pub struct Connection {
     pub fd: Fd,
     pub fd_raw: i32,
+    pub server_idx: usize,
     pub read_buf: Vec<u8>,
     pub write_buf: Vec<u8>,
     pub state: ConnState,
@@ -19,11 +20,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(fd: Fd) -> Self {
+    pub fn new(fd: Fd, server_idx: usize) -> Self {
         let fd_raw = fd.as_raw_fd();
         Self {
             fd,
             fd_raw,
+            server_idx,
             read_buf: Vec::with_capacity(4096),
             write_buf: Vec::new(),
             state: ConnState::Reading,

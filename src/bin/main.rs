@@ -7,46 +7,63 @@ mod http;
 #[path = "../config/mod.rs"]
 mod config;
 
-use std::net::SocketAddr;
-use std::time::Duration;
+use std::collections::HashMap;
 use std::os::fd::AsRawFd;
+use std::path::PathBuf;
+use std::time::Duration;
 
-use application::handler::{static_file::serve_static, error_page_handler::error_response};
+use application::handler::{error_page_handler::error_response, static_file::serve_static, cgi::serve_cgi, upload::handle_upload};
 use application::server::manager::ServerManager;
+use config::load_config;
 use core::event::EventLoop;
 use core::net::connection::Connection;
 use core::net::socket::{accept_nonblocking, create_listening_socket};
 use http::parser::{parse_request, ParseResult};
 use http::serializer::serialize_response;
-use crate::http::StatusCode;
+use http::StatusCode;
 
 fn main() -> Result<(), String> {
-    let listen_addr: SocketAddr = "0.0.0.0:8080".parse().unwrap();
-    eprintln!("Listening on {}", listen_addr);
-    let listener = create_listening_socket(listen_addr)?;
+    let cfg = load_config(std::path::Path::new("config.conf"))?;
     let event_loop = EventLoop::new()?;
-    event_loop.poller().register_read(listener.0)?;
     let mut mgr = ServerManager::new(Duration::from_secs(15));
-    let cfg = config::load_config(std::path::Path::new("config.conf"))?;
-    let server = &cfg.servers[0];
-    let root = server.root.clone().unwrap_or_else(|| std::path::PathBuf::from("www"));
+    let mut listen_map: HashMap<i32, usize> = HashMap::new();
+    let mut listen_fds: Vec<core::net::fd::Fd> = Vec::new();
+
+    for (i, srv) in cfg.servers.iter().enumerate() {
+        for addr in &srv.listen {
+            eprintln!("Listening on {}", addr);
+            let fd = create_listening_socket(*addr)?;
+            let fd_raw = fd.0;
+            event_loop.poller().register_read(fd_raw)?;
+            listen_map.insert(fd_raw, i);
+            listen_fds.push(fd);
+        }
+    }
 
     loop {
         event_loop.tick(64, Some(1000), |ev| {
-            if ev.fd == listener.0 && ev.readable {
-                loop {
-                    match accept_nonblocking(listener.0) {
-                        Ok(Some(fd)) => {
-                            let fd_raw = fd.as_raw_fd();
-                            mgr.insert(fd_raw, Connection::new(fd));
-                            let _ = event_loop.poller().register_read(fd_raw);
+            // Accept new connections on any listener
+            if let Some(&srv_idx) = listen_map.get(&ev.fd) {
+                if ev.readable {
+                    loop {
+                        match accept_nonblocking(ev.fd) {
+                            Ok(Some(fd)) => {
+                                let fd_raw = fd.as_raw_fd();
+                                mgr.insert(fd_raw, Connection::new(fd, srv_idx));
+                                let _ = event_loop.poller().register_read(fd_raw);
+                            }
+                            Ok(None) => break,
+                            Err(e) => {
+                                eprintln!("accept error: {e}");
+                                break;
+                            }
                         }
-                        Ok(None) => break,
-                        Err(e) => { eprintln!("accept error: {e}"); break; }
                     }
                 }
             } else if let Some(conn) = mgr.get_mut(ev.fd) {
                 conn.touch();
+
+                // Readable path
                 if ev.readable {
                     let mut buf = [0u8; 4096];
                     loop {
@@ -54,15 +71,20 @@ fn main() -> Result<(), String> {
                         if n > 0 {
                             let n = n as usize;
                             conn.read_buf.extend_from_slice(&buf[..n]);
-                            match parse_request(&conn.read_buf, 1_048_576) {
-                                ParseResult::Incomplete => break,
+                            match parse_request(&conn.read_buf, 20 * 1024 * 1024) {
+                                ParseResult::Incomplete => {},
                                 ParseResult::Error(err) => {
                                     let status = if err == "body too large" {
                                         StatusCode::PayloadTooLarge
                                     } else {
                                         StatusCode::BadRequest
                                     };
-                                    let resp = error_response(status, server, &root);
+                                    let srv = &cfg.servers[conn.server_idx];
+                                    let root: PathBuf = srv
+                                        .root
+                                        .clone()
+                                        .unwrap_or_else(|| PathBuf::from("www"));
+                                    let resp = error_response(status, srv, &root);
                                     let mut bytes = serialize_response(&resp, false);
                                     conn.write_buf.append(&mut bytes);
                                     conn.state = core::net::connection::ConnState::Writing;
@@ -72,15 +94,26 @@ fn main() -> Result<(), String> {
                                 ParseResult::Complete(req, used) => {
                                     conn.read_buf.drain(0..used);
                                     conn.keep_alive = req.keep_alive;
-                                    if !matches!(req.method, http::method::Method::Get) {
-                                        let resp = error_response(StatusCode::MethodNotAllowed, server, &root);
-                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
-                                        conn.write_buf.append(&mut bytes);
-                                    } else {
-                                        let resp = serve_static(server, &root, &req.path, &["index.html".into()]);
-                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
-                                        conn.write_buf.append(&mut bytes);
+                                    let srv = &cfg.servers[conn.server_idx];
+                                    let root: PathBuf = srv.root.clone().unwrap_or_else(|| PathBuf::from("www"));
+                                    let path_no_q = req.path.split('?').next().unwrap_or("");
+                                    let is_cgi = path_no_q.starts_with("/cgi-bin/") && path_no_q.ends_with(".py");
+                                    let resp = if is_cgi {
+                                         match req.method {
+                                         http::method::Method::Get | http::method::Method::Post | http::method::Method::Delete => {
+                                         serve_cgi(srv, &root, &req)
                                     }
+                                         _ => error_response(StatusCode::MethodNotAllowed, srv, &root),
+                                      }
+                                    } else if path_no_q == "/upload" {
+                                        handle_upload(srv, &root, &req)  
+                                    } else if !matches!(req.method, http::method::Method::Get) {
+                                        error_response(StatusCode::MethodNotAllowed, srv, &root)
+                                    } else {
+                                        serve_static(srv, &root, &req.path, &["index.html".into()])
+                                    };
+                                    let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                    conn.write_buf.append(&mut bytes);
                                     conn.state = core::net::connection::ConnState::Writing;
                                     let _ = event_loop.poller().register_write(ev.fd);
                                     break;
@@ -90,12 +123,20 @@ fn main() -> Result<(), String> {
                             conn.state = core::net::connection::ConnState::Closing;
                             break;
                         } else {
-                            break;
+                            break; // EAGAIN/EWOULDBLOCK or error flagged by ev.error
                         }
                     }
                 }
+
+                // Writable path
                 if ev.writable && !conn.write_buf.is_empty() {
-                    let n = unsafe { libc::write(ev.fd, conn.write_buf.as_ptr() as *const _, conn.write_buf.len()) };
+                    let n = unsafe {
+                        libc::write(
+                            ev.fd,
+                            conn.write_buf.as_ptr() as *const _,
+                            conn.write_buf.len(),
+                        )
+                    };
                     if n > 0 {
                         let n = n as usize;
                         conn.write_buf.drain(0..n);
@@ -109,7 +150,10 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
-                if ev.error || ev.eof || matches!(conn.state, core::net::connection::ConnState::Closing) {
+
+                // Cleanup
+                if ev.error || ev.eof || matches!(conn.state, core::net::connection::ConnState::Closing)
+                {
                     let _ = event_loop.poller().deregister(ev.fd);
                     mgr.remove(ev.fd);
                 }
