@@ -6,129 +6,90 @@ use std::path::{Path, PathBuf};
 use crate::config::Server;
 use crate::http::{method::Method, request::Request, response::Response, status::StatusCode};
 
-pub fn serve_cgi(_server: &Server, root: &Path, req: &Request) -> Response {
-    // Resolve script path
+pub struct CgiProcess {
+    pub pid: i32,
+    pub input: Option<RawFd>,
+    pub output: RawFd,
+}
+
+pub fn start_cgi(_server: &Server, root: &Path, req: &Request) -> Result<CgiProcess, Response> {
     let (path_no_q, query) = split_path_query(&req.path);
     let script = match resolve_script(root, path_no_q) {
         Some(p) => p,
-        None => return Response::new(StatusCode::NotFound),
+        None => return Err(Response::new(StatusCode::NotFound)),
     };
-
-    // Ensure file exists and is .py
     if script.extension().and_then(|e| e.to_str()) != Some("py") || !script.is_file() {
-        return Response::new(StatusCode::NotFound);
+        return Err(Response::new(StatusCode::NotFound));
     }
 
-    // Create pipes: stdin for child, stdout from child
     let mut in_pipe: [RawFd; 2] = [0; 2];
     let mut out_pipe: [RawFd; 2] = [0; 2];
     unsafe {
         if libc::pipe(in_pipe.as_mut_ptr()) != 0 {
-            return Response::new(StatusCode::InternalServerError);
+            return Err(Response::new(StatusCode::InternalServerError));
         }
         if libc::pipe(out_pipe.as_mut_ptr()) != 0 {
-            libc::close(in_pipe[0]);
-            libc::close(in_pipe[1]);
-            return Response::new(StatusCode::InternalServerError);
+            cleanup_pipes(in_pipe, out_pipe);
+            return Err(Response::new(StatusCode::InternalServerError));
         }
+        set_nonblock(in_pipe[1]);
+        set_nonblock(out_pipe[0]);
     }
 
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         cleanup_pipes(in_pipe, out_pipe);
-        return Response::new(StatusCode::InternalServerError);
+        return Err(Response::new(StatusCode::InternalServerError));
     }
 
     if pid == 0 {
-        // Child
         unsafe {
-            // Redirect stdin/stdout
             libc::dup2(in_pipe[0], libc::STDIN_FILENO);
             libc::dup2(out_pipe[1], libc::STDOUT_FILENO);
             cleanup_pipes(in_pipe, out_pipe);
-
-            // chdir to script dir
             if let Some(dir) = script.parent() {
                 let _ = libc::chdir(path_cstr(dir).as_ptr());
             }
-
-            // Build argv (null-terminated)
-            let argv_cstr = vec![
-                CString::new("python3").unwrap(),
-                path_cstr(&script),
-            ];
+            let argv_cstr = vec![safe_cstr("python3"), path_cstr(&script)];
             let mut argv: Vec<*const i8> = argv_cstr.iter().map(|s| s.as_ptr()).collect();
             argv.push(std::ptr::null());
 
-            // Build env (null-terminated)
             let env_cstr = build_env(req, &script, query);
             let mut envp: Vec<*const i8> = env_cstr.iter().map(|s| s.as_ptr()).collect();
             envp.push(std::ptr::null());
 
-            // execve
-            libc::execve(
-                cstr("/usr/bin/env").as_ptr(),
-                argv.as_ptr(),
-                envp.as_ptr(),
-            );
+            libc::execve(safe_cstr("/usr/bin/env").as_ptr(), argv.as_ptr(), envp.as_ptr());
             libc::_exit(127);
         }
     }
 
     // Parent
     unsafe {
-        // Close child-side ends
         libc::close(in_pipe[0]);
         libc::close(out_pipe[1]);
     }
 
-    // Write body to child stdin
-    if matches!(req.method, Method::Post | Method::Delete) && !req.body.is_empty() {
-        let mut written = 0;
-        while written < req.body.len() {
-            let n = unsafe {
-                libc::write(
-                    in_pipe[1],
-                    req.body[written..].as_ptr() as *const _,
-                    (req.body.len() - written) as libc::size_t,
-                )
-            };
-            if n <= 0 {
-                break;
-            }
-            written += n as usize;
-        }
-    }
-    unsafe { libc::close(in_pipe[1]); }
+    let input = if matches!(req.method, Method::Post | Method::Delete) && !req.body.is_empty() {
+        Some(in_pipe[1])
+    } else {
+        unsafe { libc::close(in_pipe[1]); }
+        None
+    };
 
-    // Read child stdout
-    let mut out = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = unsafe { libc::read(out_pipe[0], buf.as_mut_ptr() as *mut _, buf.len()) };
-        if n > 0 {
-            out.extend_from_slice(&buf[..n as usize]);
-        } else {
-            break;
-        }
-    }
-    unsafe { libc::close(out_pipe[0]); }
+    Ok(CgiProcess {
+        pid,
+        input,
+        output: out_pipe[0],
+    })
+}
 
-    // Wait for child
-    unsafe {
-        let mut status: libc::c_int = 0;
-        libc::waitpid(pid, &mut status, 0);
-    }
-
-    // Parse CGI response (headers \r\n\r\n body)
-    let (headers, body) = split_headers_body(&out);
-    let mut resp_headers = Response::new(StatusCode::Ok);
-    // Status header
+pub fn parse_cgi_response(out: &[u8]) -> Response {
+    let (headers, body) = split_headers_body(out);
     let mut status = StatusCode::Ok;
+    let mut resp = Response::new(StatusCode::Ok);
     for line in headers {
         if let Some(rest) = line.strip_prefix("Status:") {
-            let trimmed = rest.trim();
-            if let Some((code_str, _msg)) = trimmed.split_once(' ') {
+            if let Some((code_str, _msg)) = rest.trim().split_once(' ') {
                 if let Ok(code) = code_str.parse::<u16>() {
                     status = map_status(code);
                 }
@@ -136,12 +97,10 @@ pub fn serve_cgi(_server: &Server, root: &Path, req: &Request) -> Response {
             continue;
         }
         if let Some((k, v)) = line.split_once(':') {
-            resp_headers.headers.insert(k.trim().to_string(), v.trim().to_string());
+            resp.headers.insert(k.trim().to_string(), v.trim().to_string());
         }
     }
-    
-    let mut resp = Response::new(status);
-    resp.headers = resp_headers.headers;
+    resp.status = status;
     resp.body = body.to_vec();
     resp
 }
@@ -150,7 +109,6 @@ fn resolve_script(root: &Path, req_path: &str) -> Option<PathBuf> {
     let clean = req_path.trim_start_matches('/');
     let path = Path::new(clean);
     if path.starts_with("cgi-bin") {
-        // Some(root.join(path));
         root.join(path).canonicalize().ok()
     } else {
         None
@@ -166,42 +124,72 @@ fn cleanup_pipes(a: [RawFd; 2], b: [RawFd; 2]) {
     }
 }
 
-fn cstr(s: &str) -> CString {
-    CString::new(s).unwrap()
+fn safe_cstr(s: &str) -> CString {
+    CString::new(s.replace('\0', "")).unwrap_or_else(|_| CString::new("").unwrap())
 }
 
 fn path_cstr(p: &Path) -> CString {
-    CString::new(p.as_os_str().as_bytes()).unwrap()
+    CString::new(p.as_os_str().as_bytes().iter().copied().filter(|&b| b != 0).collect::<Vec<u8>>())
+        .unwrap_or_else(|_| CString::new("").unwrap())
 }
 
 fn build_env(req: &Request, script: &Path, query: &str) -> Vec<CString> {
     let mut env = Vec::new();
-    env.push(cstr(&format!("REQUEST_METHOD={}", method_to_str(&req.method))));
-    env.push(cstr(&format!("QUERY_STRING={}", query)));
-    env.push(cstr("SERVER_PROTOCOL=HTTP/1.1"));
-    env.push(cstr("GATEWAY_INTERFACE=CGI/1.1"));
-    env.push(cstr(&format!(
-        "CONTENT_LENGTH={}",
-        req.content_length.unwrap_or(0)
-    )));
+    env.push(safe_cstr(&format!("REQUEST_METHOD={}", method_to_str(&req.method))));
+    env.push(safe_cstr(&format!("QUERY_STRING={}", query)));
+    env.push(safe_cstr("SERVER_PROTOCOL=HTTP/1.1"));
+    env.push(safe_cstr("GATEWAY_INTERFACE=CGI/1.1"));
+    env.push(safe_cstr(&format!("CONTENT_LENGTH={}", req.content_length.unwrap_or(0))));
     if let Some(ct) = req.headers.get("Content-Type") {
-        env.push(cstr(&format!("CONTENT_TYPE={}", ct)));
+        env.push(safe_cstr(&format!("CONTENT_TYPE={}", ct)));
     }
     let full = script.canonicalize().unwrap_or_else(|_| script.to_path_buf());
-    env.push(cstr(&format!("PATH_INFO={}", full.display())));
+    env.push(safe_cstr(&format!("PATH_INFO={}", full.display())));
     env
 }
 
+fn set_nonblock(fd: RawFd) {
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+}
+
+fn split_path_query(path: &str) -> (&str, &str) {
+    if let Some(idx) = path.find('?') {
+        (&path[..idx], &path[idx + 1..])
+    } else {
+        (path, "")
+    }
+}
+
 fn split_headers_body(buf: &[u8]) -> (Vec<String>, &[u8]) {
-    if let Some(idx) = twoway::find_bytes(buf, b"\r\n\r\n").or_else(|| twoway::find_bytes(buf, b"\n\n")) {
-        let sep_len = if buf.get(idx + 1) == Some(&b'\n') && buf.get(idx) == Some(&b'\r') { 4 } else { 2 };
-        let head = &buf[..idx];
-        let body = &buf[idx + sep_len..];
-        let headers = head
-            .split(|&b| b == b'\n')
-            .filter_map(|line| std::str::from_utf8(line).ok())
-            .map(|s| s.trim_end_matches('\r').to_string())
+    let mut boundary = None;
+    for i in 0..buf.len().saturating_sub(3) {
+        if &buf[i..i + 4] == b"\r\n\r\n" {
+            boundary = Some((i, 4));
+            break;
+        }
+    }
+    if boundary.is_none() {
+        for i in 0..buf.len().saturating_sub(1) {
+            if &buf[i..i + 2] == b"\n\n" {
+                boundary = Some((i, 2));
+                break;
+            }
+        }
+    }
+
+    if let Some((idx, sep_len)) = boundary {
+        let headers_bytes = &buf[..idx];
+        let headers = headers_bytes
+            .split(|b| *b == b'\n')
+            .filter_map(|line| {
+                let line = if line.ends_with(b"\r") { &line[..line.len() - 1] } else { line };
+                if line.is_empty() { None } else { Some(String::from_utf8_lossy(line).to_string()) }
+            })
             .collect();
+        let body = &buf[idx + sep_len..];
         (headers, body)
     } else {
         (Vec::new(), buf)
@@ -221,18 +209,10 @@ fn map_status(code: u16) -> StatusCode {
     }
 }
 
-fn method_to_str(m: &Method) -> &'static str {
-    match m {
+fn method_to_str(method: &Method) -> &'static str {
+    match method {
         Method::Get => "GET",
         Method::Post => "POST",
         Method::Delete => "DELETE",
-    }
-}
-
-fn split_path_query(path: &str) -> (&str, &str) {
-    if let Some((p, q)) = path.split_once('?') {
-    (p, q)
-    } else {
-        (path, "")
     }
 }

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::config::Server;
 use crate::http::{response::Response, status::StatusCode};
@@ -55,9 +55,8 @@ pub fn handle_upload(server: &Server, root: &Path, req: &Request) -> Response {
         return Response::new(StatusCode::InternalServerError);
     }
 
-    let mut resp = Response::new(StatusCode::Ok);
-    resp.body = format!("Uploaded as {}", path.display()).into_bytes();
-    resp.headers.insert("Content-Type".into(), "text/plain; charset=utf-8".into());
+    let mut resp = Response::new(StatusCode::SeeOther);
+    resp.headers.insert("Location".into(), "/upload.html".into());
     resp
 }
 

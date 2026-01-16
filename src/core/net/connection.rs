@@ -6,6 +6,12 @@ pub enum ConnState {
     Reading,
     Writing,
     Closing,
+    Cgi {
+        pid: i32,
+        input: Option<i32>,
+        output: i32,
+        data: Vec<u8>,
+    },
 }
 
 pub struct Connection {
