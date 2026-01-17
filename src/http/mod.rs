@@ -8,5 +8,4 @@ pub mod serializer;
 
 pub use method::Method;
 pub use status::StatusCode;
-pub use request::Request;
 pub use response::Response;

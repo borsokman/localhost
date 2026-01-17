@@ -8,8 +8,9 @@ mod http;
 mod config;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
+use std::path::Path;
 use std::time::Duration;
 
 use application::handler::{error_page_handler::error_response, static_file::serve_static, cgi::{start_cgi, parse_cgi_response}, upload::handle_upload};
@@ -20,36 +21,38 @@ use core::net::connection::{Connection, ConnState};
 use core::net::socket::{accept_nonblocking, create_listening_socket};
 use http::parser::{parse_request, ParseResult};
 use http::serializer::serialize_response;
-use http::StatusCode;
+use http::{Response, StatusCode};
 
 fn main() -> Result<(), String> {
     let cfg = load_config(std::path::Path::new("config.conf"))?;
     let event_loop = EventLoop::new()?;
     let mut mgr = ServerManager::new(Duration::from_secs(15));
-    let mut listen_map: HashMap<i32, usize> = HashMap::new();
+    let mut listen_map: HashMap<i32, SocketAddr> = HashMap::new();
     let mut listen_fds: Vec<core::net::fd::Fd> = Vec::new();
 
-    for (i, srv) in cfg.servers.iter().enumerate() {
+    for srv in &cfg.servers {
         for addr in &srv.listen {
-            eprintln!("Listening on {}", addr);
-            let fd = create_listening_socket(*addr)?;
-            let fd_raw = fd.0;
-            event_loop.poller().register_read(fd_raw)?;
-            listen_map.insert(fd_raw, i);
-            listen_fds.push(fd);
+            if !listen_map.values().any(|a| a == addr) {
+                eprintln!("Listening on {}", addr);
+                let fd = create_listening_socket(*addr)?;
+                let fd_raw = fd.0;
+                event_loop.poller().register_read(fd_raw)?;
+                listen_map.insert(fd_raw, *addr);
+                listen_fds.push(fd);
+            }
         }
     }
 
     loop {
         event_loop.tick(64, Some(1000), |ev| {
             // Accept new connections on any listener
-            if let Some(&srv_idx) = listen_map.get(&ev.fd) {
+            if let Some(&local_addr) = listen_map.get(&ev.fd) {
                 if ev.readable {
                     loop {
                         match accept_nonblocking(ev.fd) {
                             Ok(Some(fd)) => {
                                 let fd_raw = fd.as_raw_fd();
-                                mgr.insert(fd_raw, Connection::new(fd, srv_idx));
+                                mgr.insert(fd_raw, Connection::new(fd, local_addr));
                                 let _ = event_loop.poller().register_read(fd_raw);
                             }
                             Ok(None) => break,
@@ -84,13 +87,17 @@ fn main() -> Result<(), String> {
                                         if n > 0 {
                                             let n = n as usize;
                                             conn.read_buf.extend_from_slice(&buf[..n]);
-                                            match parse_request(&conn.read_buf, 20 * 1024 * 1024) {
+                                            
+                                            // We don't know the exact limit yet until we parse the Host header,
+                                            // so use a reasonable global max for initial parsing.
+                                            match parse_request(&conn.read_buf, 100 * 1024 * 1024) {
                                                 ParseResult::Incomplete => {},
                                                 ParseResult::Error(err) => {
                                                     let status = if err == "body too large" { StatusCode::PayloadTooLarge } else { StatusCode::BadRequest };
-                                                    let srv = &cfg.servers[conn.server_idx];
-                                                    let root: PathBuf = srv.root.clone().unwrap_or_else(|| PathBuf::from("www"));
-                                                    let resp = error_response(status, srv, &root);
+                                                    // Use default server for this port for error response
+                                                    let srv = cfg.find_server(conn.local_addr, None);
+                                                    let root = srv.root.as_deref().unwrap_or(Path::new("www"));
+                                                    let resp = error_response(status, srv, root);
                                                     let mut bytes = serialize_response(&resp, false);
                                                     conn.write_buf.append(&mut bytes);
                                                     conn.state = ConnState::Writing;
@@ -100,23 +107,64 @@ fn main() -> Result<(), String> {
                                                 ParseResult::Complete(req, used) => {
                                                     conn.read_buf.drain(0..used);
                                                     conn.keep_alive = req.keep_alive;
-                                                    let srv = &cfg.servers[conn.server_idx];
-                                                    let root: PathBuf = srv.root.clone().unwrap_or_else(|| PathBuf::from("www"));
-                                                    let path_no_q = req.path.split('?').next().unwrap_or("");
-                                                    let is_cgi = path_no_q.starts_with("/cgi-bin/") && path_no_q.ends_with(".py");
                                                     
-                                                    if is_cgi && matches!(req.method, http::method::Method::Get | http::method::Method::Post | http::method::Method::Delete) {
-                                                        match start_cgi(srv, &root, &req) {
+                                                    let host_header = req.headers.get("Host").map(|s| s.as_str());
+                                                    let srv = cfg.find_server(conn.local_addr, host_header);
+                                                    let loc = srv.find_location(&req.path);
+                                                    
+                                                    // 1. Check body limit
+                                                    let limit = loc.and_then(|l| l.body_limit).or(srv.client_max_body_size).unwrap_or(20 * 1024 * 1024);
+                                                    if req.body.len() as u64 > limit {
+                                                        let root = loc.and_then(|l| l.root.as_deref()).or(srv.root.as_deref()).unwrap_or(Path::new("www"));
+                                                        let resp = error_response(StatusCode::PayloadTooLarge, srv, root);
+                                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                        conn.write_buf.append(&mut bytes);
+                                                        conn.state = ConnState::Writing;
+                                                        let _ = event_loop.poller().register_write(conn_fd);
+                                                        break;
+                                                    }
+
+                                                    // 2. Check methods
+                                                    if let Some(l) = loc {
+                                                        if let Some(allowed) = &l.methods {
+                                                            if !allowed.contains(&req.method.into()) {
+                                                                let root = l.root.as_deref().or(srv.root.as_deref()).unwrap_or(Path::new("www"));
+                                                                let resp = error_response(StatusCode::MethodNotAllowed, srv, root);
+                                                                let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                                conn.write_buf.append(&mut bytes);
+                                                                conn.state = ConnState::Writing;
+                                                                let _ = event_loop.poller().register_write(conn_fd);
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // 3. Handle redirect
+                                                    if let Some(l) = loc {
+                                                        if let Some(redir) = &l.redirect {
+                                                            let mut resp = Response::new(StatusCode::MovedPermanently);
+                                                            resp.headers.insert("Location".into(), redir.clone());
+                                                            let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                            conn.write_buf.append(&mut bytes);
+                                                            conn.state = ConnState::Writing;
+                                                            let _ = event_loop.poller().register_write(conn_fd);
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    let root = loc.and_then(|l| l.root.as_deref()).or(srv.root.as_deref()).unwrap_or(Path::new("www"));
+                                                    let path_no_q = req.path.split('?').next().unwrap_or("");
+                                                    
+                                                    // 4. Handle CGI
+                                                    if let Some(cgi_config) = loc.and_then(|l| l.cgi.as_ref()) {
+                                                        match start_cgi(srv, root, &req, cgi_config) {
                                                             Ok(cgi_proc) => {
-                                                                // Register pipes
                                                                 let _ = event_loop.poller().register_read(cgi_proc.output);
                                                                 mgr.pipe_map.insert(cgi_proc.output, conn_fd);
-                                                                
                                                                 if let Some(input) = cgi_proc.input {
                                                                     let _ = event_loop.poller().register_write(input);
                                                                     mgr.pipe_map.insert(input, conn_fd);
                                                                 }
-                                                                
                                                                 conn.state = ConnState::Cgi {
                                                                     pid: cgi_proc.pid,
                                                                     input: cgi_proc.input,
@@ -134,12 +182,21 @@ fn main() -> Result<(), String> {
                                                             }
                                                         }
                                                     } else {
+                                                        // 5. Handle Static / Upload
                                                         let resp = if path_no_q == "/upload" {
-                                                            handle_upload(srv, &root, &req)  
-                                                        } else if !matches!(req.method, http::method::Method::Get) {
-                                                            error_response(StatusCode::MethodNotAllowed, srv, &root)
+                                                            handle_upload(srv, root, &req)  
                                                         } else {
-                                                            serve_static(srv, &root, &req.path, &["index.html".into()])
+                                                            let mut indices = srv.index.clone();
+                                                            if let Some(l) = loc {
+                                                                if let Some(df) = &l.default_file {
+                                                                    indices.insert(0, df.clone());
+                                                                }
+                                                            }
+                                                            if indices.is_empty() {
+                                                                indices.push("index.html".into());
+                                                            }
+                                                            let autoindex = loc.and_then(|l| l.autoindex).unwrap_or(false);
+                                                            serve_static(srv, root, &req.path, &indices, autoindex)
                                                         };
                                                         let mut bytes = serialize_response(&resp, conn.keep_alive);
                                                         conn.write_buf.append(&mut bytes);

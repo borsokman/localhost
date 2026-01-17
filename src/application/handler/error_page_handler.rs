@@ -7,7 +7,7 @@ pub fn error_response(status: StatusCode, server: &Server, root: &Path) -> Respo
     let code = status.as_u16();
 
     // Look for a custom error page in config
-    let custom_path = server.error_pages.iter()
+    let custom_path = server.errors.iter()
         .find(|e| e.code == code)
         .map(|e| e.path.clone());
 
@@ -20,7 +20,7 @@ pub fn error_response(status: StatusCode, server: &Server, root: &Path) -> Respo
             root.join(custom_path)
         }
     } else {
-        root.join("error_pages").join(format!("{}.html", code))
+        root.join("errors").join(format!("{}.html", code))
     };
 
     let mut resp = Response::new(status);

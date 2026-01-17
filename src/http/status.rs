@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy)]
 pub enum StatusCode {
     Ok,
+    MovedPermanently,
     SeeOther,
     BadRequest,
     Forbidden,
@@ -14,6 +15,7 @@ impl StatusCode {
     pub fn as_u16(self) -> u16 {
         match self {
             StatusCode::Ok => 200,
+            StatusCode::MovedPermanently => 301,
             StatusCode::SeeOther => 303,
             StatusCode::BadRequest => 400,
             StatusCode::Forbidden => 403,
@@ -26,6 +28,7 @@ impl StatusCode {
     pub fn reason(self) -> &'static str {
         match self {
             StatusCode::Ok => "OK",
+            StatusCode::MovedPermanently => "Moved Permanently",
             StatusCode::SeeOther => "See Other",
             StatusCode::BadRequest => "Bad Request",
             StatusCode::Forbidden => "Forbidden",

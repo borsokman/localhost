@@ -3,7 +3,7 @@ use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use crate::config::Server;
+use crate::config::{Server, Cgi};
 use crate::http::{method::Method, request::Request, response::Response, status::StatusCode};
 
 pub struct CgiProcess {
@@ -12,14 +12,16 @@ pub struct CgiProcess {
     pub output: RawFd,
 }
 
-pub fn start_cgi(_server: &Server, root: &Path, req: &Request) -> Result<CgiProcess, Response> {
+pub fn start_cgi(_server: &Server, root: &Path, req: &Request, cgi_config: &Cgi) -> Result<CgiProcess, Response> {
     let (path_no_q, query) = split_path_query(&req.path);
     let script = match resolve_script(root, path_no_q) {
         Some(p) => p,
         None => return Err(Response::new(StatusCode::NotFound)),
     };
-    if script.extension().and_then(|e| e.to_str()) != Some("py") || !script.is_file() {
-        return Err(Response::new(StatusCode::NotFound));
+    
+    // Check extension
+    if script.extension().and_then(|e| e.to_str()) != Some(&cgi_config.extension.trim_start_matches('.')) || !script.is_file() {
+         return Err(Response::new(StatusCode::NotFound));
     }
 
     let mut in_pipe: [RawFd; 2] = [0; 2];
@@ -50,7 +52,10 @@ pub fn start_cgi(_server: &Server, root: &Path, req: &Request) -> Result<CgiProc
             if let Some(dir) = script.parent() {
                 let _ = libc::chdir(path_cstr(dir).as_ptr());
             }
-            let argv_cstr = vec![safe_cstr("python3"), path_cstr(&script)];
+            
+            let interpreter = path_cstr(&cgi_config.interpreter);
+            let script_path = path_cstr(&script);
+            let argv_cstr = vec![interpreter, script_path];
             let mut argv: Vec<*const i8> = argv_cstr.iter().map(|s| s.as_ptr()).collect();
             argv.push(std::ptr::null());
 
@@ -58,7 +63,7 @@ pub fn start_cgi(_server: &Server, root: &Path, req: &Request) -> Result<CgiProc
             let mut envp: Vec<*const i8> = env_cstr.iter().map(|s| s.as_ptr()).collect();
             envp.push(std::ptr::null());
 
-            libc::execve(safe_cstr("/usr/bin/env").as_ptr(), argv.as_ptr(), envp.as_ptr());
+            libc::execve(cgi_config.interpreter.as_os_str().as_bytes().as_ptr() as *const i8, argv.as_ptr(), envp.as_ptr());
             libc::_exit(127);
         }
     }

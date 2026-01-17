@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
         let mut server_names = Vec::new();
         let mut root = None;
         let mut index = Vec::new();
-        let mut error_pages = Vec::new();
+        let mut errors = Vec::new();
         let mut locations = Vec::new();
         let mut client_max_body_size = None;
 
@@ -164,7 +164,7 @@ impl<'a> Parser<'a> {
                     self.next();
                     let code = self.expect_number_u16()?;
                     let path = self.expect_stringish()?;
-                    error_pages.push(ErrorPage { code, path });
+                    errors.push(ErrorPage { code, path });
                     self.expect(Token::Semi)?;
                 }
                 Some(Token::Ident(s)) if s == "location" => {
@@ -192,7 +192,7 @@ impl<'a> Parser<'a> {
             server_names,
             root,
             index,
-            error_pages,
+            errors,
             locations,
             client_max_body_size,
         })
