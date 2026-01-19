@@ -37,6 +37,7 @@ pub struct Server {
     pub index: Vec<String>,
     pub errors: Vec<ErrorPage>,
     pub client_max_body_size: Option<u64>,
+    pub keep_alive_timeout: Option<u64>,
     pub locations: Vec<Location>,
 }
 

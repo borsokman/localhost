@@ -21,31 +21,34 @@ pub struct Connection {
     pub local_addr: SocketAddr,
     pub read_buf: Vec<u8>,
     pub write_buf: Vec<u8>,
-    pub state: ConnState,
-    pub last_activity: Instant,
-    pub keep_alive: bool,
-}
-
-impl Connection {
-    pub fn new(fd: Fd, local_addr: SocketAddr) -> Self {
-        let fd_raw = fd.as_raw_fd();
-        Self {
-            fd,
-            fd_raw,
-            local_addr,
-            read_buf: Vec::with_capacity(4096),
-            write_buf: Vec::new(),
-            state: ConnState::Reading,
-            last_activity: Instant::now(),
-            keep_alive: true,
+        pub state: ConnState,
+        pub last_activity: Instant,
+        pub keep_alive: bool,
+        pub timeout: Duration,
+    }
+    
+    impl Connection {
+        pub fn new(fd: Fd, local_addr: SocketAddr, timeout: Duration) -> Self {
+            let fd_raw = fd.as_raw_fd();
+            Self {
+                fd,
+                fd_raw,
+                local_addr,
+                read_buf: Vec::with_capacity(4096),
+                write_buf: Vec::new(),
+                state: ConnState::Reading,
+                last_activity: Instant::now(),
+                keep_alive: true,
+                timeout,
+            }
+        }
+    
+        pub fn touch(&mut self) {
+            self.last_activity = Instant::now();
+        }
+    
+        pub fn is_timed_out(&self) -> bool {
+            self.last_activity.elapsed() >= self.timeout
         }
     }
-
-    pub fn touch(&mut self) {
-        self.last_activity = Instant::now();
-    }
-
-    pub fn is_timed_out(&self, idle: Duration) -> bool {
-        self.last_activity.elapsed() >= idle
-    }
-}
+    

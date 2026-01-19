@@ -1,20 +1,17 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use crate::core::net::connection::Connection;
 
 pub struct ServerManager {
     pub conns: HashMap<i32, Connection>,
     pub pipe_map: HashMap<i32, i32>,
-    pub idle_timeout: Duration,
 }
 
 impl ServerManager {
-    pub fn new(idle_timeout: Duration) -> Self {
+    pub fn new() -> Self {
         Self {
             conns: HashMap::new(),
             pipe_map: HashMap::new(),
-            idle_timeout,
         }
     }
 
@@ -55,11 +52,18 @@ impl ServerManager {
         self.conns.remove(&fd);
     }
 
-    pub fn sweep_timeouts(&mut self) -> Vec<i32> {
-        let idle = self.idle_timeout;
-        self.conns
-            .iter()
-            .filter_map(|(&fd, c)| if c.is_timed_out(idle) { Some(fd) } else { None })
-            .collect()
+        pub fn sweep_timeouts(&mut self) -> Vec<i32> {
+
+            self.conns
+
+                .iter()
+
+                .filter_map(|(&fd, c)| if c.is_timed_out() { Some(fd) } else { None })
+
+                .collect()
+
+        }
+
     }
-}
+
+    

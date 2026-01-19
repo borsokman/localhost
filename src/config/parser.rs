@@ -120,6 +120,7 @@ impl<'a> Parser<'a> {
         let mut errors = Vec::new();
         let mut locations = Vec::new();
         let mut client_max_body_size = None;
+        let mut keep_alive_timeout = None;
 
         loop {
             match self.peek() {
@@ -182,6 +183,11 @@ impl<'a> Parser<'a> {
                     client_max_body_size = Some(self.expect_number_u64()?);
                     self.expect(Token::Semi)?;
                 }
+                Some(Token::Ident(s)) if s == "keep_alive_timeout" => {
+                    self.next();
+                    keep_alive_timeout = Some(self.expect_number_u64()?);
+                    self.expect(Token::Semi)?;
+                }
                 Some(tok) => return Err(format!("Unknown directive in server: {:?}", tok)),
                 None => return Err("Unexpected EOF in server block".into()),
             }
@@ -195,6 +201,7 @@ impl<'a> Parser<'a> {
             errors,
             locations,
             client_max_body_size,
+            keep_alive_timeout,
         })
     }
 

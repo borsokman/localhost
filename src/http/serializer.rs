@@ -1,6 +1,7 @@
+use std::time::Duration;
 use crate::http::response::Response;
 
-pub fn serialize_response(resp: &Response, keep_alive: bool) -> Vec<u8> {
+pub fn serialize_response(resp: &Response, keep_alive: bool, timeout: Duration) -> Vec<u8> {
     let mut out = Vec::with_capacity(256 + resp.body.len());
     out.extend_from_slice(
         format!(
@@ -17,6 +18,7 @@ pub fn serialize_response(resp: &Response, keep_alive: bool) -> Vec<u8> {
     if !resp.headers.contains_key("Connection") {
         if keep_alive {
             out.extend_from_slice(b"Connection: keep-alive\r\n");
+            out.extend_from_slice(format!("Keep-Alive: timeout={}\r\n", timeout.as_secs()).as_bytes());
         } else {
             out.extend_from_slice(b"Connection: close\r\n");
         }

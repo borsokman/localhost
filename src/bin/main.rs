@@ -26,7 +26,7 @@ use http::{Response, StatusCode};
 fn main() -> Result<(), String> {
     let cfg = load_config(std::path::Path::new("config.conf"))?;
     let event_loop = EventLoop::new()?;
-    let mut mgr = ServerManager::new(Duration::from_secs(15));
+    let mut mgr = ServerManager::new();
     let mut listen_map: HashMap<i32, SocketAddr> = HashMap::new();
     let mut listen_fds: Vec<core::net::fd::Fd> = Vec::new();
 
@@ -52,7 +52,9 @@ fn main() -> Result<(), String> {
                         match accept_nonblocking(ev.fd) {
                             Ok(Some(fd)) => {
                                 let fd_raw = fd.as_raw_fd();
-                                mgr.insert(fd_raw, Connection::new(fd, local_addr));
+                                let srv = cfg.find_server(local_addr, None);
+                                let timeout = Duration::from_secs(srv.keep_alive_timeout.unwrap_or(75));
+                                mgr.insert(fd_raw, Connection::new(fd, local_addr, timeout));
                                 let _ = event_loop.poller().register_read(fd_raw);
                             }
                             Ok(None) => break,
@@ -98,7 +100,7 @@ fn main() -> Result<(), String> {
                                                     let srv = cfg.find_server(conn.local_addr, None);
                                                     let root = srv.root.as_deref().unwrap_or(Path::new("www"));
                                                     let resp = error_response(status, srv, root);
-                                                    let mut bytes = serialize_response(&resp, false);
+                                                    let mut bytes = serialize_response(&resp, false, conn.timeout);
                                                     conn.write_buf.append(&mut bytes);
                                                     conn.state = ConnState::Writing;
                                                     let _ = event_loop.poller().register_write(conn_fd);
@@ -117,7 +119,7 @@ fn main() -> Result<(), String> {
                                                     if req.body.len() as u64 > limit {
                                                         let root = loc.and_then(|l| l.root.as_deref()).or(srv.root.as_deref()).unwrap_or(Path::new("www"));
                                                         let resp = error_response(StatusCode::PayloadTooLarge, srv, root);
-                                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                        let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                         conn.write_buf.append(&mut bytes);
                                                         conn.state = ConnState::Writing;
                                                         let _ = event_loop.poller().register_write(conn_fd);
@@ -130,7 +132,7 @@ fn main() -> Result<(), String> {
                                                             if !allowed.contains(&req.method.into()) {
                                                                 let root = l.root.as_deref().or(srv.root.as_deref()).unwrap_or(Path::new("www"));
                                                                 let resp = error_response(StatusCode::MethodNotAllowed, srv, root);
-                                                                let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                                let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                                 conn.write_buf.append(&mut bytes);
                                                                 conn.state = ConnState::Writing;
                                                                 let _ = event_loop.poller().register_write(conn_fd);
@@ -144,7 +146,7 @@ fn main() -> Result<(), String> {
                                                         if let Some(redir) = &l.redirect {
                                                             let mut resp = Response::new(StatusCode::MovedPermanently);
                                                             resp.headers.insert("Location".into(), redir.clone());
-                                                            let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                            let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                             conn.write_buf.append(&mut bytes);
                                                             conn.state = ConnState::Writing;
                                                             let _ = event_loop.poller().register_write(conn_fd);
@@ -174,7 +176,7 @@ fn main() -> Result<(), String> {
                                                                 break;
                                                             },
                                                             Err(resp) => {
-                                                                let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                                let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                                 conn.write_buf.append(&mut bytes);
                                                                 conn.state = ConnState::Writing;
                                                                 let _ = event_loop.poller().register_write(conn_fd);
@@ -198,7 +200,7 @@ fn main() -> Result<(), String> {
                                                             let autoindex = loc.and_then(|l| l.autoindex).unwrap_or(false);
                                                             serve_static(srv, root, &req.path, &indices, autoindex)
                                                         };
-                                                        let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                                        let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                         conn.write_buf.append(&mut bytes);
                                                         conn.state = ConnState::Writing;
                                                         let _ = event_loop.poller().register_write(conn_fd);
@@ -241,7 +243,7 @@ fn main() -> Result<(), String> {
                                             }
                                             unsafe { libc::waitpid(pid_cp, std::ptr::null_mut(), libc::WNOHANG); }
 
-                                            let mut bytes = serialize_response(&resp, conn.keep_alive);
+                                            let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                             conn.write_buf.append(&mut bytes);
                                             conn.state = ConnState::Writing;
                                             let _ = event_loop.poller().register_write(conn_fd);
