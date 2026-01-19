@@ -12,12 +12,17 @@ pub fn error_response(status: StatusCode, server: &Server, root: &Path) -> Respo
         .map(|e| e.path.clone());
 
     let file = if let Some(custom) = custom_path {
-        // If custom path is absolute, use as is; else, join with root
-        let custom_path = PathBuf::from(&custom);
-        if custom_path.is_absolute() {
-            custom_path
+        // If custom path is absolute, check existence or treat as relative to root
+        let custom_pb = PathBuf::from(&custom);
+        if custom_pb.is_absolute() {
+            if custom_pb.exists() {
+                custom_pb
+            } else {
+                let relative = custom.trim_start_matches('/');
+                root.join(relative)
+            }
         } else {
-            root.join(custom_path)
+            root.join(custom_pb)
         }
     } else {
         root.join("errors").join(format!("{}.html", code))
