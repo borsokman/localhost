@@ -7,23 +7,23 @@ curl -v -H "Content-Length: 2000000" --data-binary @bigfile http://127.0.0.1:808
 
 
 CGI:
-
 http://localhost:8080/cgi-bin/hello.py?x=1
-
 GET: curl -v "http://127.0.0.1:8080/cgi-bin/hello.py?x=1"
-
 POST: curl -v -X POST --data "hi" http://127.0.0.1:8080/cgi-bin/hello.py
-
 DELETE: curl -v -X DELETE --data "bye" http://127.0.0.1:8080/cgi-bin/hello.py
-
-fetch('/cgi-bin/hello.py?x=1', { method: 'POST', body: 'hi' })
-  .then(r => r.text()).then(console.log);
-
-fetch('/cgi-bin/hello.py', { method: 'DELETE', body: 'bye' })
-  .then(r => r.text()).then(console.log);
 
 
 Upload:
+curl -X POST http://localhost:8080/uploads
+curl -X DELETE http://localhost:8080/uploads
+curl -X GET http://localhost:8080/uploads
 
-echo "hello" > /tmp/test.txt
-curl -v -F "file=@/tmp/test.txt" http://127.0.0.1:8080/upload
+Multiple servers/different hostnames on the same port:
+curl http://test.com:8080/
+
+Routes and default file:
+
+echo "Hello from Desktop" > ~/Desktop/somefile.txt
+curl http://localhost:8080/files/somefile.txt
+curl http://localhost:8080/files/
+curl -X DELETE http://localhost:8080/files/somefile.txt

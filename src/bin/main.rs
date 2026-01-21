@@ -14,7 +14,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::time::Duration;
 
-use application::handler::{error_page_handler::error_response, static_file::serve_static, cgi::{start_cgi, parse_cgi_response}, upload::handle_upload};
+use application::handler::{error_page_handler::error_response, static_file::serve_static, cgi::{start_cgi, parse_cgi_response}, upload::handle_upload, delete::handle_delete};
 use application::server::manager::ServerManager;
 use config::load_config;
 use core::event::EventLoop;
@@ -199,6 +199,9 @@ fn main() -> Result<(), String> {
                                                         // 5. Handle Static / Upload
                                                         let resp = if path_no_q == "/upload" {
                                                             handle_upload(srv, root, &req)  
+                                                        } else if req.method == http::method::Method::Delete {
+                                                            let location_prefix = loc.map(|l| l.path.as_str()).unwrap_or("");
+                                                            application::handler::delete::handle_delete(srv, root, &req, location_prefix)
                                                         } else {
                                                             let mut indices = srv.index.clone();
                                                             if let Some(l) = loc {
@@ -210,7 +213,8 @@ fn main() -> Result<(), String> {
                                                                 indices.push("index.html".into());
                                                             }
                                                             let autoindex = loc.and_then(|l| l.autoindex).unwrap_or(false);
-                                                            serve_static(srv, root, &req.path, &indices, autoindex)
+                                                            let location_prefix = loc.map(|l| l.path.as_str()).unwrap_or("");
+                                                            serve_static(srv, root, &req.path, location_prefix, &indices, autoindex)
                                                         };
                                                         let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                         conn.write_buf.append(&mut bytes);
