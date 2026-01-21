@@ -27,3 +27,18 @@ echo "Hello from Desktop" > ~/Desktop/somefile.txt
 curl http://localhost:8080/files/somefile.txt
 curl http://localhost:8080/files/
 curl -X DELETE http://localhost:8080/files/somefile.txt
+
+Wrong request:
+
+curl http://localhost:8080/doesnotexist
+
+touch www/forbidden.html
+chmod 000 www/forbidden.html
+curl http://localhost:8080/forbidden.html
+
+Corrupted files:
+
+curl -F "file=@/Users/sagynbek.osmonaliev/Desktop/somefile.txt" http://localhost:8080/upload
+curl http://localhost:8080/uploads/somefile.txt -o downloaded.txt
+diff /Users/sagynbek.osmonaliev/Gritlab/localhost/www/uploads/somefile.txt downloaded.txt
+

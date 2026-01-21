@@ -34,9 +34,14 @@ fn mime_for(path: &Path) -> &'static str {
     }
 }
 
-pub fn serve_static(server: &Server, root: &Path, path: &str, location_prefix: &str, index: &[String], autoindex: bool) -> Response {
-    // Strip the location prefix from the request path
-    let rel_path = path.strip_prefix(location_prefix).unwrap_or("");
+pub fn serve_static(server: &Server, root: &Path, path: &str, location_prefix: &str, strip_prefix: bool, index: &[String], autoindex: bool) -> Response {
+    // Optionally strip the location prefix when the location has its own root
+    let rel_path = if strip_prefix {
+        path.strip_prefix(location_prefix).unwrap_or(path)
+    } else {
+        path
+    };
+    let rel_path = rel_path.trim_start_matches('/');
     let full_path = match safe_join(root, rel_path) {
         Some(p) => p,
         None => return error_response(StatusCode::NotFound, server, root),

@@ -166,7 +166,8 @@ fn main() -> Result<(), String> {
                                                         }
                                                     }
 
-                                                    let root = loc.and_then(|l| l.root.as_deref()).or(srv.root.as_deref()).unwrap_or(Path::new("www"));
+                                                    let loc_root = loc.and_then(|l| l.root.as_deref());
+                                                    let root = loc_root.or(srv.root.as_deref()).unwrap_or(Path::new("www"));
                                                     let path_no_q = req.path.split('?').next().unwrap_or("");
                                                     
                                                     // 4. Handle CGI
@@ -214,7 +215,13 @@ fn main() -> Result<(), String> {
                                                             }
                                                             let autoindex = loc.and_then(|l| l.autoindex).unwrap_or(false);
                                                             let location_prefix = loc.map(|l| l.path.as_str()).unwrap_or("");
-                                                            serve_static(srv, root, &req.path, location_prefix, &indices, autoindex)
+                                                            // Strip prefix only if location root differs from server root
+                                                            let strip_prefix = match (loc_root, srv.root.as_deref()) {
+                                                                (Some(lr), Some(sr)) => lr != sr,
+                                                                (Some(_), None) => true,
+                                                                _ => false,
+                                                            };
+                                                            serve_static(srv, root, &req.path, location_prefix, strip_prefix, &indices, autoindex)
                                                         };
                                                         let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                         conn.write_buf.append(&mut bytes);
