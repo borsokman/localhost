@@ -8,6 +8,7 @@ mod http;
 mod config;
 
 use std::collections::HashMap;
+use std::io;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
 use std::path::Path;
@@ -80,7 +81,18 @@ fn main() -> Result<(), String> {
                         let conn = mgr.conns.get_mut(&conn_fd).unwrap();
                         conn.touch();
 
-                        match &mut conn.state {
+                        // Check for connection errors or EOF first - close immediately
+                        if ev.error || (ev.eof && ev.fd == conn_fd) {
+                            conn.state = ConnState::Closing;
+                        }
+
+                        // If state is already Closing, handle it immediately
+                        if matches!(conn.state, ConnState::Closing) {
+                            let _ = event_loop.poller().deregister(conn_fd);
+                            unsafe { libc::close(conn_fd) };
+                            should_close = true;
+                        } else {
+                            match &mut conn.state {
                             ConnState::Reading => {
                                 if ev.fd == conn_fd && ev.readable {
                                     let mut buf = [0u8; 4096];
@@ -209,9 +221,15 @@ fn main() -> Result<(), String> {
                                                 }
                                             }
                                         } else if n == 0 {
+                                            // EOF - client closed connection
                                             conn.state = ConnState::Closing;
                                             break;
                                         } else {
+                                            // Read error - close connection
+                                            let err = io::Error::last_os_error();
+                                            if err.raw_os_error() != Some(libc::EAGAIN) && err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+                                                conn.state = ConnState::Closing;
+                                            }
                                             break;
                                         }
                                     }
@@ -276,12 +294,18 @@ fn main() -> Result<(), String> {
                                     if n > 0 {
                                         let n = n as usize;
                                         conn.write_buf.drain(0..n);
-                                    }
-                                    if conn.write_buf.is_empty() {
-                                        let _ = event_loop.poller().disable_write(conn_fd);
-                                        if conn.keep_alive {
-                                            conn.state = ConnState::Reading;
-                                        } else {
+                                        if conn.write_buf.is_empty() {
+                                            let _ = event_loop.poller().disable_write(conn_fd);
+                                            if conn.keep_alive {
+                                                conn.state = ConnState::Reading;
+                                            } else {
+                                                conn.state = ConnState::Closing;
+                                            }
+                                        }
+                                    } else if n < 0 {
+                                        // Write error - close connection
+                                        let err = io::Error::last_os_error();
+                                        if err.raw_os_error() != Some(libc::EAGAIN) && err.raw_os_error() != Some(libc::EWOULDBLOCK) {
                                             conn.state = ConnState::Closing;
                                         }
                                     }
@@ -289,9 +313,13 @@ fn main() -> Result<(), String> {
                             },
                             ConnState::Closing => {
                                  let _ = event_loop.poller().deregister(conn_fd);
+                                 // Explicitly close the socket to free the port immediately
+                                 // The Fd's Drop will also try to close it, but closing an already-closed fd is safe
+                                 unsafe { libc::close(conn_fd) };
                                  should_close = true;
                             }
                         }
+                        } // end of else/match
                     } // end of conn borrow
 
                     if should_close {
@@ -303,6 +331,8 @@ fn main() -> Result<(), String> {
 
         for fd in mgr.sweep_timeouts() {
             let _ = event_loop.poller().deregister(fd);
+            // Explicitly close the socket before removing from manager
+            unsafe { libc::close(fd) };
             mgr.remove(fd);
         }
     }
