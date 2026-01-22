@@ -132,7 +132,11 @@ fn main() -> Result<(), String> {
                                                     conn.read_buf.drain(0..used);
                                                     conn.keep_alive = req.keep_alive;
                                                     
-                                                    let host_header = req.headers.get("Host").map(|s| s.as_str());
+                                                    // Host header may come in any casing; try common variants
+                                                    let host_header = req.headers
+                                                        .get("Host")
+                                                        .or_else(|| req.headers.get("host"))
+                                                        .map(|s| s.as_str());
                                                     let srv = cfg.find_server(conn.local_addr, host_header);
                                                     let loc = srv.find_location(&req.path);
                                                     

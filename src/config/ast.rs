@@ -8,11 +8,18 @@ pub struct Config {
 
 impl Config {
     pub fn find_server(&self, addr: SocketAddr, host_header: Option<&str>) -> &Server {
-        let host = host_header.and_then(|h| h.split(':').next()).unwrap_or("");
+        // Extract host without port and normalize to lowercase for case-insensitive match
+        let host = host_header
+            .and_then(|h| h.split(':').next())
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         
         // 1. Try to find a server that matches both listen address and server_name
         for srv in &self.servers {
-            if srv.listen.contains(&addr) && srv.server_names.iter().any(|n| n == host) {
+            if srv.listen.contains(&addr)
+                && srv.server_names.iter().any(|n| n.to_ascii_lowercase() == host)
+            {
                 return srv;
             }
         }

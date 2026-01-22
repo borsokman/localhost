@@ -12,7 +12,6 @@ http://localhost:8080/cgi-bin/hello.py?x=1
 Unchunked
 GET: curl -v "http://127.0.0.1:8080/cgi-bin/hello.py?x=1"
 POST: curl -v -X POST --data "hi" http://127.0.0.1:8080/cgi-bin/hello.py
-DELETE: curl -v -X DELETE --data "bye" http://127.0.0.1:8080/cgi-bin/hello.py
 
 Chunked
 curl -v -X POST -H "Transfer-Encoding: chunked" --data-binary file=@/Users/sagynbek.osmonaliev/Desktop/somefile.txt http://localhost:8080/cgi-bin/hello.py
@@ -58,8 +57,10 @@ curl -vL http://localhost:8080/old
 
 Memory leak:
 
-Xcode needed
+pgrep main
+top -pid <new_pid>
+siege
 
 Connection hanging:
 
-lsof -iTCP:8080 -sTCP:ESTABLISHED
+lsof -iTCP:8080 -sTCP:ESTABLISHED + siege
