@@ -42,3 +42,9 @@ curl -F "file=@/Users/sagynbek.osmonaliev/Desktop/somefile.txt" http://localhost
 curl http://localhost:8080/uploads/somefile.txt -o downloaded.txt
 diff /Users/sagynbek.osmonaliev/Gritlab/localhost/www/uploads/somefile.txt downloaded.txt
 
+Directory list:
+http://localhost:8080/files/
+
+Redirect:
+
+curl -vL http://localhost:8080/old
