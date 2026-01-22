@@ -57,6 +57,7 @@ pub fn handle_upload(server: &Server, root: &Path, req: &Request) -> Response {
 
     let mut resp = Response::new(StatusCode::SeeOther);
     resp.headers.insert("Location".into(), "/upload.html".into());
+    resp.set_cookie("upload=ok; Path=/; HttpOnly");
     resp
 }
 

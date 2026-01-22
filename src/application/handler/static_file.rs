@@ -100,6 +100,7 @@ pub fn serve_static(server: &Server, root: &Path, path: &str, location_prefix: &
     let mut resp = Response::new(StatusCode::Ok);
     resp.body = bytes;
     resp.headers.insert("Content-Type".into(), mime_for(&target).into());
+    resp.set_cookie("served=static; Path=/; HttpOnly");
     resp
 }
 
@@ -122,5 +123,6 @@ fn serve_autoindex(server: &Server, root: &Path, req_path: &str, dir_path: &Path
     let mut resp = Response::new(StatusCode::Ok);
     resp.body = html.into_bytes();
     resp.headers.insert("Content-Type".into(), "text/html; charset=utf-8".into());
+    resp.set_cookie("served=static; Path=/; HttpOnly");
     resp
 }
