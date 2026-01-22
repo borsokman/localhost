@@ -7,7 +7,7 @@ mod http;
 #[path = "../config/mod.rs"]
 mod config;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
@@ -30,9 +30,19 @@ fn main() -> Result<(), String> {
     let mut mgr = ServerManager::new();
     let mut listen_map: HashMap<i32, SocketAddr> = HashMap::new();
     let mut listen_fds: Vec<core::net::fd::Fd> = Vec::new();
+    let mut seen = HashSet::new();
 
     for srv in &cfg.servers {
         for addr in &srv.listen {
+            for addr in &srv.listen {
+                for name in &srv.server_names {
+                    let key = (addr, name);
+                    if !seen.insert(key.clone()) {
+                       eprintln!("Config error: duplicate listen address {} with server_name '{}'", addr, name);
+                       std::process::exit(1);
+                    }
+                }
+            }
             if !listen_map.values().any(|a| a == addr) {
                 eprintln!("Listening on {}", addr);
                 let fd = create_listening_socket(*addr)?;

@@ -8,9 +8,15 @@ curl -v -H "Content-Length: 2000000" --data-binary @bigfile http://127.0.0.1:808
 
 CGI:
 http://localhost:8080/cgi-bin/hello.py?x=1
+
+Unchunked
 GET: curl -v "http://127.0.0.1:8080/cgi-bin/hello.py?x=1"
 POST: curl -v -X POST --data "hi" http://127.0.0.1:8080/cgi-bin/hello.py
 DELETE: curl -v -X DELETE --data "bye" http://127.0.0.1:8080/cgi-bin/hello.py
+
+Chunked
+curl -v -X POST -H "Transfer-Encoding: chunked" --data-binary file=@/Users/sagynbek.osmonaliev/Desktop/somefile.txt http://localhost:8080/cgi-bin/hello.py
+curl -v -X POST -H "Transfer-Encoding: chunked" --data-binary "chunked test" http://localhost:8080/cgi-bin/hello.py
 
 
 Upload:
@@ -43,8 +49,17 @@ curl http://localhost:8080/uploads/somefile.txt -o downloaded.txt
 diff /Users/sagynbek.osmonaliev/Gritlab/localhost/www/uploads/somefile.txt downloaded.txt
 
 Directory list:
+
 http://localhost:8080/files/
 
 Redirect:
 
 curl -vL http://localhost:8080/old
+
+Memory leak:
+
+Xcode needed
+
+Connection hanging:
+
+lsof -iTCP:8080 -sTCP:ESTABLISHED
