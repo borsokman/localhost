@@ -89,7 +89,6 @@ pub fn parse_request(buf: &[u8], body_limit: usize) -> ParseResult {
                     Request {
                         method,
                         path,
-                        version,
                         headers,
                         body,
                         content_length: None,
@@ -122,7 +121,6 @@ pub fn parse_request(buf: &[u8], body_limit: usize) -> ParseResult {
             Request {
                 method,
                 path,
-                version,
                 headers,
                 body,
                 content_length,

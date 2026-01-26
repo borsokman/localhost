@@ -64,3 +64,11 @@ siege
 Connection hanging:
 
 lsof -iTCP:8080 -sTCP:ESTABLISHED + siege
+
+One read one write:
+
+nc localhost 8080
+
+POST /upload HTTP/1.1
+Host: localhost
+Content-Length: 1000000

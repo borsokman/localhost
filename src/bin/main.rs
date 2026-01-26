@@ -14,7 +14,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::time::Duration;
 
-use application::handler::{error_page_handler::error_response, static_file::serve_static, cgi::{start_cgi, parse_cgi_response}, upload::handle_upload, delete::handle_delete};
+use application::handler::{error_page_handler::error_response, static_file::serve_static, cgi::{start_cgi, parse_cgi_response}, upload::handle_upload};
 use application::server::manager::ServerManager;
 use config::load_config;
 use core::event::EventLoop;
