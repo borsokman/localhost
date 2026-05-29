@@ -1,0 +1,48 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build the Rust Server
+        run: cargo build --release
+
+      - name: Start the Server
+        run: |
+          # The '&' runs it in the background
+          ./target/release/main &
+
+          # Wait a few seconds to let the server bind to the port
+          sleep 3
+
+      - name: Make scripts executable
+        run: chmod +x run_tests.sh
+
+      - name: Run Integration Tests
+        run: ./run_tests.sh
