@@ -235,7 +235,11 @@ fn main() -> Result<(), String> {
                                                                 (Some(_), None) => true,
                                                                 _ => false,
                                                             };
-                                                            serve_static(srv, root, &req.path, location_prefix, strip_prefix, &indices, autoindex)
+                                                            if req.method == http::method::Method::Get {
+                                                                serve_static(srv, root, &req.path, location_prefix, strip_prefix, &indices, autoindex)
+                                                            } else {
+                                                                error_response(StatusCode::MethodNotAllowed, srv, root)
+                                                            }
                                                         };
                                                         let mut bytes = serialize_response(&resp, conn.keep_alive, conn.timeout);
                                                         conn.write_buf.append(&mut bytes);

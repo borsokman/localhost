@@ -13,7 +13,7 @@ check_status() {
     local extra_args=$4
 
     # Run curl, suppress output, and just grab the HTTP status code
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" $extra_args "$url")
+    STATUS=$(eval curl -s -o /dev/null -w \"%{http_code}\" -X $method $extra_args \"$url\")
     
     if [ "$STATUS" -eq "$expected_status" ]; then
         echo "✅ Passed: $method $url -> Got $STATUS"
@@ -39,7 +39,7 @@ check_status 405 POST "$BASE_URL/"
 dd if=/dev/zero of=bigfile bs=1M count=2 2>/dev/null
 # We expect the server to reject this big payload (Assuming 413 status)
 check_status 413 POST "$BASE_URL/" "-H 'Content-Length: 2000000' --data-binary @bigfile"
-rm bigfile forbidden.html
+rm -f bigfile www/forbidden.html
 
 echo "--- Testing CGI ---"
 # Unchunked GET
