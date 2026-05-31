@@ -35,8 +35,8 @@ jobs:
 
       - name: Start the Server
         run: |
-          # The '&' runs it in the background
-          ./target/release/main &
+          # Redirect stdout and stderr so the GitHub runner doesn't hang waiting for them
+          nohup ./target/release/main > server.log 2>&1 &
 
           # Wait a few seconds to let the server bind to the port
           sleep 3

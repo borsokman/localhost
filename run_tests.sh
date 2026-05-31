@@ -48,7 +48,7 @@ check_status 200 GET "$BASE_URL/cgi-bin/hello.py?x=1"
 check_status 200 POST "$BASE_URL/cgi-bin/hello.py" "--data hi"
 
 # Chunked POST
-echo "chunked test data" > chunk_test.txt
+printf "11\r\nchunked test data\r\n0\r\n\r\n" > chunk_test.txt
 check_status 200 POST "$BASE_URL/cgi-bin/hello.py" "-H 'Transfer-Encoding: chunked' --data-binary @chunk_test.txt"
 rm chunk_test.txt
 
