@@ -41,6 +41,10 @@ dd if=/dev/zero of=bigfile bs=1M count=2 2>/dev/null
 check_status 413 POST "$BASE_URL/" "-H 'Content-Length: 2000000' --data-binary @bigfile"
 rm -f bigfile www/forbidden.html
 
+# 500 Internal Server Error (Triggered via highly excessive filename length resulting in OS read error)
+LONG_URL=$(printf 'a%.0s' {1..300})
+check_status 500 GET "$BASE_URL/$LONG_URL"
+
 echo "--- Testing CGI ---"
 # Unchunked GET
 check_status 200 GET "$BASE_URL/cgi-bin/hello.py?x=1"
@@ -70,10 +74,13 @@ else
 fi
 rm test_upload.txt downloaded.txt
 
-echo "--- Testing Routing and Deletion ---"
+echo "--- Testing Routing and Host Headers ---"
 check_status 200 GET "$BASE_URL/"
 # Redirect check: if /old redirects to /new, curl -L follows it. We check that it eventually hits a 200.
 check_status 200 GET "$BASE_URL/old" "-L"
+
+# Unknown / external Host Header verification (Should still serve from default server block)
+check_status 200 GET "$BASE_URL/" "-H 'Host: test.com:8080'"
 
 if [ $ERRORS -gt 0 ]; then
     echo "--------------------------"
