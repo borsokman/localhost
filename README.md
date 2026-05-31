@@ -10,7 +10,7 @@ A simple HTTP server build from scratch supporting static files, uploads, CGI, r
 - Redirects and custom locations
 - Cookie handling (stateless, NGINX-style)
 - Multiple server blocks and ports
-- Configurable viaa `config.conf`
+- Configurable via `config.conf`
 
 ## Usage
 
