@@ -1,4 +1,4 @@
-# Localhost
+# Localhostt
 
 A simple HTTP server build from scratch supporting static files, uploads, CGI, redirects, cookies, and multi-server configuration (NGINX-style).
 
